@@ -1,0 +1,131 @@
+```{r}
+library(caTools)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(randomForest)
+```
+
+
+```{r}
+# Load the data set
+dataCTR = read.csv("CTR.csv")
+
+str(dataCTR)
+
+dataCTR$CTRbinary = as.factor(dataCTR$CTR>0.05)
+```
+
+
+```{r}
+# Split data into training and testing sets
+set.seed(123)  # So we get the same results
+spl = sample.split(dataCTR$CTRbinary, SplitRatio = 0.7)
+
+CTRTrain = dataCTR %>% filter(spl == TRUE)
+CTRTest = dataCTR %>% filter(spl == FALSE)
+```
+
+Side note: explain the pipe %>% 
+Many functions in dplyr, ggplot, and R in general take some type of data as the first argument, then they apply some type of transformation which is specified by the second, third, fourth, etc. arguments
+For example, filter(TweetsTM, spl == TRUE) says to filter the rows of dataCTR to those with spl == TRUE. The pipe operator %>% feeds the left side into the first argument of the right side
+Here we apply it once, but the real power comes in applying this recursively...
+
+
+```{r}
+# Function to compute accuracy of a classification model
+tableAccuracy <- function(test, pred) {
+  t = table(test, pred)
+  a = sum(diag(t))/length(test)
+  return(a)
+}
+```
+
+```{r}
+# Cross-validated CART model
+set.seed(3421)
+train.cart = train(CTRbinary ~ .-CTR,
+                   data = CTRTrain,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp=seq(0, 0.4, 0.002)),
+                   trControl = trainControl(method="cv", number=10))
+train.cart
+train.cart$results
+```
+
+```{r}
+mod.cart = train.cart$finalModel
+prp(mod.cart)
+```
+
+```{r}
+CTRTest.mm = as.data.frame(model.matrix(CTRbinary ~ . -CTR, data = CTRTest))
+predict.cart = predict(mod.cart, newdata = CTRTest.mm, type = "class") 
+table(CTRTest$CTRbinary, predict.cart)
+tableAccuracy(CTRTest$CTRbinary, predict.cart)
+```
+
+```{r}
+# Basic Random Forests:
+CTRRF = randomForest(CTRbinary ~ .-CTR, data=CTRTrain)
+```
+
+```{r}
+PredictRF = predict(CTRRF, newdata = CTRTest)
+table(CTRTest$CTRbinary, PredictRF)
+tableAccuracy(CTRTest$CTRbinary, PredictRF)
+```
+
+```{r}
+# Cross validated RF
+set.seed(311)
+train.rf = train(CTRbinary ~ .-CTR,
+                 data = CTRTrain,
+                 method = "rf",
+                 tuneGrid = data.frame(mtry = 1:5),
+                 trControl = trainControl(method = "cv", number = 5, verboseIter = TRUE))
+train.rf
+train.rf$results
+```
+```{r}
+mod.rf = train.rf$finalModel
+predict.rf = predict(mod.rf, newdata = CTRTest.mm)
+table(CTRTest$CTRbinary, predict.rf)
+tableAccuracy(CTRTest$CTRbinary, predict.rf)
+```
+```{r}
+# Variable importance using dplyr and the pipe
+# Step 1: turn mod.rf$importance into a data frame
+# Step 2: create a new variable (column) called Words equal to the rownames of mod.rf$importance
+# Step 3: arrange in descendending order according to variable importance measure
+as.data.frame(mod.rf$importance) %>%
+  mutate(Words = rownames(mod.rf$importance)) %>%
+  arrange(desc(MeanDecreaseGini))
+```
+
+```{r}
+# Boosting
+tGrid = expand.grid(n.trees = (80:85)*50, interaction.depth = c(1,2,4,6,8,10,12,14,16),
+                    shrinkage = 0.01, n.minobsinnode = 10)
+```
+```{r}
+set.seed(232)
+train.boost <- train(CTRbinary ~ .-CTR,
+                     data = CTRTrain,
+                     method = "gbm",
+                     tuneGrid = tGrid,
+                     trControl = trainControl(method="cv", number=5, verboseIter = TRUE),
+                     metric = "Accuracy",
+                     distribution = "bernoulli")
+train.boost
+train.boost$results
+```
+```{r}
+mod.boost = train.boost$finalModel
+
+predict.boost = predict(mod.boost, newdata = CTRTest.mm, n.trees = 4050, type = "response")
+table(CTRTest$CTRbinary, predict.boost < 0.5) # for some reason the probabilities are flipped in gbm
+tableAccuracy(CTRTest$CTRbinary, predict.boost < 0.5)
+```
+

@@ -1,0 +1,94 @@
+---
+title: "Discussion_5"
+output:
+  html_document: default
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caTools) # splits
+library(rpart) # CART
+library(rpart.plot) # CART plotting
+library(caret) # cross validation
+parole <- read.csv("NYCparole.csv")
+```
+
+```{r}
+# Very important below!!! 
+# transform Violate from 0-1 variable to a factor variable, otherwise CART may try it as regression
+parole$Violator <- as.factor(parole$Violator)
+```
+
+```{r}
+set.seed(144)
+split <- sample.split(parole$Violator, 0.7) # 70/30 split
+
+parole.train <- filter(parole, split == TRUE)
+parole.test <- filter(parole, split == FALSE)
+
+# Baseline:
+table(parole.train$Violator)
+table(parole.test$Violator)
+```
+Now let's build a classification tree 
+
+rpart takes the following syntax:
+Model equation (similar to regression)
+data (similar to regression)
+method:     "class" for classification, "anova" for regression
+minbucket:  minimum number of observations per bucket
+cp:         we can preset the cp before pruning if we know that we want that desired level of cp
+```{r}
+mod <- rpart(Violator ~ Male + Age + TimeServed + Class + Multiple + InCity,
+            data = parole.train, method="class", 
+            parms=list(split='information'), 
+            # information here stands for information gain,
+            # which means we choose cross-entropy as our split rule.
+            minbucket=5, cp = 0.01)
+mod
+prp(mod) 
+```
+```{r}
+# Make predictions 
+pred <- predict(mod, newdata = parole.test, type = "class")
+table(parole.test$Violator, pred)
+```
+Let's incoproate a loss matrix.
+```{r}
+loss.mat <- cbind(c(0, 20), c(1, 0)) # cbind is column bind, rbind is row bind
+loss.mat
+# adding loss function to a list of "parms"
+mod2 = rpart(Violator ~ Male + Age + TimeServed + Class + Multiple + InCity,
+             data = parole.train, method="class", 
+             parms=list(loss = loss.mat),
+             minbucket = 5, cp = 0.01)
+prp(mod2, digits=3)
+```
+```{r}
+pred2 <- predict(mod2, newdata = parole.test, type = "class")
+table(parole.test$Violator, pred2)
+```
+
+```{r}
+modcv = train(Violator ~ Male + Age + TimeServed + Class + Multiple + InCity,
+                    data = parole.train,
+                    method = "rpart",
+                    tuneGrid = data.frame(cp = seq(0, .04, by=.002)),
+                    trControl = trainControl(method="cv", number=5))
+modcv$results # please ignore kappa
+modcv
+```
+plot the results
+```{r}
+ggplot(modcv$results, aes(x=cp, y=Accuracy)) + geom_point(size=3) +
+  xlab("Complexity Parameter (cp)") + geom_line()
+```
+
+Find the best model
+```{r}
+modcv$bestTune
+mod3 = modcv$finalModel
+prp(mod3, digits=3)
+```
+

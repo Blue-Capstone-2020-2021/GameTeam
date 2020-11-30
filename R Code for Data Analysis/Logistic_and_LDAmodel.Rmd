@@ -1,0 +1,109 @@
+---
+title: "Discussion_4"
+output:
+  html_document: default
+---
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(caTools)
+library(ROCR)
+library(MASS)
+```
+
+```{r}
+churn <- read.csv("customerchurn.csv")
+set.seed(144)
+```
+
+```{r}
+split <- sample.split(churn$Churn, SplitRatio = 0.7)
+
+train <- filter(churn, split == TRUE)
+test <- filter(churn, split == FALSE)
+```
+ 
+```{r}
+LogModel <- glm(Churn ~ MonthlyCharges + SeniorCitizen + PaymentMethod + InternetService + tenure +  Contract, data=train, family="binomial")
+summary(LogModel)
+```
+
+```{r}
+predTestLog <- predict(LogModel, newdata=test, type="response")  # type = "response" gives the predicted probabilities
+summary(predTestLog)
+```
+
+```{r}
+# Now, create the confusion matrix with threshold probability = 0.5.
+table(test$Churn, predTestLog > 0.5)
+# What is the accuracy?
+(1409+280)/(281+280+1409+140)
+
+# What is the True Positive Rate ?
+280/( 280+281)
+
+# What is the False Positive rate ?
+140/(140+1409)
+```
+
+```{r}
+# Now, try threshold probability = 1/3.
+table(test$Churn, predTestLog > 1/3)
+# What is the accuracy?
+# What is the True Positive Rate ?
+# What is the False Positive rate ?
+
+```
+
+```{r}
+# Some ROC packages in R
+# ROCR, pROC, PRROC, plotROC, precrec, ROCit
+
+# Take ROCR as an example
+# ROC curves
+rocr.log.pred <- prediction(predTestLog, test$Churn)
+logPerformance <- performance(rocr.log.pred, "tpr", "fpr")
+plot(logPerformance, colorize = TRUE)
+abline(0, 1)
+as.numeric(performance(rocr.log.pred, "auc")@y.values)
+```
+```{r}
+LdaModel <- lda(Churn ~ MonthlyCharges + SeniorCitizen + PaymentMethod + InternetService + tenure + Contract, data=train)
+predTestLDA <- predict(LdaModel, newdata=test) #reference
+predTestLDA_probs <- predTestLDA$posterior[,2]
+table(test$Churn, predTestLDA_probs > 1/3)
+```
+
+```{r}
+rocr.lda.pred <- prediction(predTestLDA_probs, test$Churn)
+ldaPerformance <- performance(rocr.lda.pred, "tpr", "fpr")
+plot(ldaPerformance, colorize = TRUE)
+abline(0, 1)
+as.numeric(performance(rocr.lda.pred, "auc")@y.values)
+```
+```{r}
+plot(logPerformance, col="blue")
+plot(ldaPerformance, col="red", add=TRUE)
+abline(0,1)
+```
+
+```{r}
+# For fun, let's use LDA for a multiclass problem
+# Predict payment type based on monthy charges, senior citizen, Internet service, tenure, contract
+
+lda_fun_mod <- lda(PaymentMethod ~ MonthlyCharges + SeniorCitizen + InternetService + 
+                     tenure + Contract, data = train)
+
+pred_test_lda_fun <- predict(lda_fun_mod, newdata = test)
+pred_test_lda_fun_class <- pred_test_lda_fun$class
+pred_test_lda_fun_probs <- pred_test_lda_fun$posterior
+
+# table
+tab = table(test$PaymentMethod, pred_test_lda_fun_class)
+
+# accuracy
+sum(diag(tab))/ sum(tab)
+
+```
+
